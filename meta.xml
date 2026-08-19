@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<meta>
+    <author>Reticent</author>
+    <name>HUSHazard - Hush. Hard Universal Search. Hazard (1.29)</name>
+    <description>Добавляет механики опасности, износ предметов и кастомный лут.</description>
+    <credits>Reticent</credits>
+    <version>1.29.163451</version>
+    <tags>
+        <tag>HUSH</tag>
+        <tag>Hard</tag>
+        <tag>Universal</tag>
+        <tag>Search</tag>
+        <tag>Hazard</tag>
+        <tag>1.29</tag>
+    </tags>
+    <dependencies>
+        <!-- Указываем базовую игру, так как сам на себя мод ссылаться не должен -->
+        <dependency>DZ_Data</dependency>
+        <dependency>DZ_Scripts</dependency>
+    </dependencies>
+</meta>
