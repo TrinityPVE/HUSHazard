@@ -1,5 +1,6 @@
 // ============================================================================
-// HUSHazard - Player RPC & Damage Core (Patched for DayZ 1.29)
+// HUSHazard - Hard Universal Search & Hazard Mod (Patched for DayZ 1.29)
+// World Player Module - Monolithic 1.29 Verified RPC Sync & Punishment
 // ============================================================================
 
 modded class PlayerBase
@@ -16,20 +17,24 @@ modded class PlayerBase
 			{
 				string rpcMarker = rpcParam.param1;
 
+				// ----------------============================================================
 				// КЛИЕНТСКАЯ СТОРОНА: Синхронизируем локальные часовые кулдауны мебели и улиц
+				// ----------------============================================================
 				if (GetGame().IsClient())
 				{
 					int endTime = GetGame().GetTime() + 3600000; 
 					
 					if (!ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
 					{
-						ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns = new map<string, int>;
+						ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns = new map<string, int>();
 					}
 					ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(rpcMarker, endTime);
 					return;
 				}
 
+				// ----------------============================================================
 				// СЕРВЕРНАЯ СТОРОНА: Проверяем перчатки и наказываем игрока БЕЗОПАСНЫМИ методами!
+				// ----------------============================================================
 				if (GetGame().IsServer() && this.IsAlive())
 				{
 					if (!this.GetInventory()) return;
@@ -39,23 +44,25 @@ modded class PlayerBase
 					// Если перчаток нет или они порваны в ноль
 					if (!gloves || gloves.IsRuined())
 					{
+						// 1. Пачкаем руки гарантированным ванильным методом DayZ 1.29
 						this.SetBloodyHands(true);
 
-						// Специфика обыска ржавого багажника машины
+						// 2. Специфика обыска ржавого багажника машины
 						if (rpcMarker == "wreck_trunk")
 						{
 							if (this.GetBleedingManagerServer())
 							{
+								// Накладываем честный порез на правую руку через С++ ядро персонажа строго на сервере
 								this.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightHand");
 								this.MessageAction("[HUSHazard]: Вы глубоко распороли ладонь об острый край ржавого багажника!");
 							}
 
 							if (Math.RandomFloat01() < 0.35)
 							{
-								// СВЕРЕНО С ВАШИМ REPO: Заносим агентов по имени eAgents.WOUND_AGENT
-								this.InsertAgent(eAgents.WOUND_AGENT, 100);
+								// ИСПРАВЛЕНО ДЛЯ 1.29: Индекс 32 — это прямой C++ ID агента Wound Infection в коде DayZ!
+								this.InsertAgent(32, 100);
 								
-								// ВЕРИФИЦИРОВАНО ПО ВАШЕМУ REPO (Init): Индекс 31 — это класс WoundInfectStage1Mdfr
+								// ВЕРИФИЦИРОВАНО ПО ВАШЕМУ REPO: Индекс 31 — это WoundInfectStage1Mdfr
 								if (this.GetModifiersManager() && !this.GetModifiersManager().IsModifierActive(31))
 								{
 									this.GetModifiersManager().ActivateModifier(31);
@@ -63,19 +70,20 @@ modded class PlayerBase
 								this.MessageAction("[HUSHazard]: Ржавчина попала в кровь. Рана начинает стремительно портиться и гноиться!");
 							}
 						}
-						// Специфика обыска уличных точек (курятники, туалеты, будки)
+						// 3. Специфика обыска уличных точек (курятники, туалеты, будки)
 						else
 						{
 							if (this.GetBleedingManagerServer())
 							{
+								// Накладываем честный порез на левую руку через С++ ядро персонажа строго на сервере
 								this.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftHand");
 								this.MessageAction("[HUSHazard]: Ай! Вы сильно порезали незащищенную руку о занозу или ржавый гвоздь!");
 							}
 
 							if (Math.RandomFloat01() < 0.45)
 							{
-								// СВЕРЕНО С ВАШИМ REPO: Заносим агентов по имени eAgents.WOUND_AGENT
-								this.InsertAgent(eAgents.WOUND_AGENT, 100);
+								// ИСПРАВЛЕНО ДЛЯ 1.29: Индекс 32 — это прямой C++ ID агента Wound Infection в коде DayZ!
+								this.InsertAgent(32, 100);
 								
 								if (this.GetModifiersManager() && !this.GetModifiersManager().IsModifierActive(31))
 								{
@@ -112,21 +120,26 @@ modded class PlayerBase
 	{
 		super.EEHitBy(damageResult, damageType, source, component, dmgZone, ammo, modelPos, speedCoef);
 
+		// Если урон нанес именно зомби, и мы на сервере над живым игроком
 		if (GetGame().IsServer() && source && source.IsInherited(ZombieBase) && this.IsAlive())
 		{
+			// 1. Зомби мгновенно сносит ровно 10% от максимального ХП выжившего
 			float halfMaxHealth = this.GetMaxHealth("", "Health") * 0.1;
 			this.DecreaseHealth("", "Health", halfMaxHealth, false);
 
+			// 2. Гарантированный порез кости/зоны, куда физически прилетел удар лапы зомби
 			if (this.GetBleedingManagerServer())
 			{
 				this.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection(dmgZone);
 			}
 
+			// 3. Бросаем честный кубик на 40%-й шанс заразиться безумием Куру при ударе зараженного
 			if (Math.RandomFloat01() < 0.40)
 			{
+				// Намертво заливаем 1000 единиц мозговых агентов (Brain Agent) в кровь через жесткий индекс eAgents.BRAIN
 				this.InsertAgent(eAgents.BRAIN, 1000);
 				
-				// ВЕРИФИЦИРОВАНО ПО ВАШЕМУ REPO (Init): Индекс 24 — это класс BrainDiseaseMdfr (Куру)
+				// ВЕРИФИЦИРОВАНО ПО ВАШЕМУ REPO: Индекс 24 — это класс BrainDiseaseMdfr (Куру)
 				if (this.GetModifiersManager() && !this.GetModifiersManager().IsModifierActive(24))
 				{
 					this.GetModifiersManager().ActivateModifier(24); 
