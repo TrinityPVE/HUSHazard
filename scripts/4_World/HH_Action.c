@@ -1,29 +1,46 @@
 // ============================================================================
-// HUSHazard - Action & Combat Core (Patched for DayZ 1.29)
+// HUSHazard - Action, Combat & Registration Core (Patched for DayZ 1.29)
 // ============================================================================
 
 // ----------------------------------------------------------------------------
-// ЧАСТЬ 1: УЛИЧНЫЙ СЕКТОР (КУРЯТНИКИ, БУДКИ, СУХИЕ ТУАЛЕТЫ — БЕСШУМНЫЙ СЕРВЕР)
+// СНАЧАЛА ОБЪЯВЛЯЕМ ВСЕ КЛАССЫ КОЛБЭКОВ (ПОРЯДОК СИНТАКСИСА ДЛЯ DAYZ 1.29)
 // ----------------------------------------------------------------------------
 class ActionSearchHazardCB : ActionContinuousBaseCB
 {
-	override void CreateActionComponent() 
-	{ 
-		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); 
-	}
+	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
 };
 
+class ActionSearchFurnitureCB : ActionContinuousBaseCB
+{
+	protected EffectSound m_SearchSoundLoop;
+
+	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
+	override void InitActionComponent()
+	{
+		super.InitActionComponent();
+		if (GetGame().IsClient() || !GetGame().IsMultiplayer())
+		{
+			m_SearchSoundLoop = SEffectManager.PlaySoundOnObject("HH_Zombie_Search_SoundSet", m_ActionData.m_Player);
+		}
+	}
+	override void OnFinish(bool pCanceled) { super.OnFinish(pCanceled); if (m_SearchSoundLoop) m_SearchSoundLoop.SoundStop(); }
+};
+
+class ActionSearchEngineWreckCB : ActionContinuousBaseCB
+{
+	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
+};
+
+class ActionSearchTrunkWreckCB : ActionContinuousBaseCB
+{
+	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
+};
+// ----------------------------------------------------------------------------
+// ЧАСТЬ 1: УЛИЧНЫЙ СЕКТОР (КУРЯТНИКИ, БУДКИ, СУХИЕ ТУАЛЕТЫ)
+// ----------------------------------------------------------------------------
 class ActionSearchHazard : ActionContinuousBase
 {
-	void ActionSearchHazard() 
-	{ 
-		m_CallbackClass = ActionSearchFurnitureCB; 
-		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; 
-		m_FullBody = true; 
-		m_Text = "Обыскать"; 
-		m_LockTargetOnUse = false; 
-	}
-	
+	void ActionSearchHazard() { m_CallbackClass = ActionSearchHazardCB; m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; m_FullBody = true; m_Text = "Обыскать"; m_LockTargetOnUse = false; }
 	override typename GetInputType() { return ContinuousInteractActionInput; }
 	override void CreateConditionComponents() { m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT); m_ConditionItem = new CCINone(); }
 
@@ -36,10 +53,9 @@ class ActionSearchHazard : ActionContinuousBase
 		string typeName = targetObj.GetType(); typeName.ToLower();
 		if (typeName.Contains("toilet") || typeName.Contains("kennel") || typeName.Contains("dog") || typeName.Contains("coop") || typeName.Contains("chicken"))
 		{
-			string uniqueCooldownKey = targetObj.GetID().ToString() + "_street";
-			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns && ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(targetObj.GetID().ToString() + "_street"))
 			{
-				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
+				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(targetObj.GetID().ToString() + "_street")) return false;
 			}
 			return true;
 		}
@@ -58,7 +74,6 @@ class ActionSearchHazard : ActionContinuousBase
 
 		string typeName = targetObj.GetType(); typeName.ToLower();
 
-		// Износ перчаток на сервере (Применяется к предмету, работает штатно)
 		EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
 		if (gloves && !gloves.IsRuined())
 		{
@@ -73,35 +88,22 @@ class ActionSearchHazard : ActionContinuousBase
 		HUSHazardServerManager.ProcessSearch(player, targetObj, targetCategory);
 		
 		string uniqueCooldownKey = targetObj.GetID().ToString() + "_street";
-		ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+		{
+			ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		}
 		
-		// ПИНАЕМ RPC-ПАКЕТ ИГРОКУ: Серверная сторона OnRPC сама проверит перчатки и выдаст порезы/сепсис/рвоту!
 		ref Param1<string> rpcKeyParam = new Param1<string>(targetCategory);
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
 	}
 };
-// ----------------------------------------------------------------------------
-// ЧАСТЬ 2: МЕБЕЛЬНЫЙ СЕКТОР (ШКАФЫ И ИНТЕРЬЕРЫ — СБРОС НА ПЕРВОЙ МИЛЛИСЕКУНДЕ)
-// ----------------------------------------------------------------------------
-class ActionSearchFurnitureCB : ActionContinuousBaseCB
-{
-	protected EffectSound m_SearchSoundLoop;
 
-	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
-	override void InitActionComponent()
-	{
-		super.InitActionComponent();
-		if (GetGame().IsClient() || !GetGame().IsMultiplayer())
-		{
-			m_SearchSoundLoop = SEffectManager.PlaySoundOnObject("HH_Zombie_Search_SoundSet", m_ActionData.m_Player);
-		}
-	}
-	override void OnFinish(bool pCanceled) { super.OnFinish(pCanceled); if (m_SearchSoundLoop) m_SearchSoundLoop.SoundStop(); }
-};
-
+// ----------------------------------------------------------------------------
+// ЧАСТЬ 2: МЕБЕЛЬНЫЙ СЕКТОР (ШКАФЫ И ИНТЕРЬЕРЫ)
+// ----------------------------------------------------------------------------
 class ActionSearchFurniture : ActionContinuousBase
 {
-	static ref map<string, int> m_HH_GlobalFurnitureCooldowns = new map<string, int>;
+	static ref map<string, int> m_HH_GlobalFurnitureCooldowns = new map<string, int>();
 
 	void ActionSearchFurniture() { m_CallbackClass = ActionSearchFurnitureCB; m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; m_FullBody = true; m_Text = "Обыскать"; m_LockTargetOnUse = false; }
 	override typename GetInputType() { return ContinuousInteractActionInput; }
@@ -122,7 +124,7 @@ class ActionSearchFurniture : ActionContinuousBase
 		if (typeName.Contains("cupboard") || typeName.Contains("shelves") || typeName.Contains("table") || typeName.Contains("dresser") || typeName.Contains("wardrobe") || typeName.Contains("refrigerator") || typeName.Contains("sideboard") || typeName.Contains("bookcase") || typeName.Contains("cabinet"))
 		{
 			string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
-			if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+			if (m_HH_GlobalFurnitureCooldowns && m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 			{
 				if (GetGame().GetTime() < m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
@@ -150,17 +152,15 @@ class ActionSearchFurniture : ActionContinuousBase
 
 		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
 		HUSHazardServerManager.ProcessSearch(action_data.m_Player, targetObj, selectionName);
-		m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		if (m_HH_GlobalFurnitureCooldowns)
+		{
+			m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		}
 	}
 };
 // ----------------------------------------------------------------------------
 // ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР (КАПОТЫ И БАГАЖНИКИ ОСТОВОВ МАШИН)
 // ----------------------------------------------------------------------------
-class ActionSearchEngineWreckCB : ActionContinuousBaseCB
-{
-	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
-};
-
 class ActionSearchEngineWreck : ActionContinuousBase
 {
 	void ActionSearchEngineWreck() { m_CallbackClass = ActionSearchEngineWreckCB; m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; m_FullBody = true; m_Text = "Обыскать капот"; m_LockTargetOnUse = false; }
@@ -177,15 +177,18 @@ class ActionSearchEngineWreck : ActionContinuousBase
 		string typeName = targetObj.GetType(); typeName.ToLower();
 		if (typeName.Contains("wreck") || typeName.Contains("volha") || typeName.Contains("offroad"))
 		{
+			if (!ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+			{
+				ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns = new map<string, int>();
+			}
+
 			string uniqueCooldownKey = targetObj.GetID().ToString() + "_engine";
 			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 			{
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
-			
-			// ИСПРАВЛЕНО ДЛЯ 1.29: Добавлен индекс [2] для сравнения продольной оси Z спереди капота!
-			if (modelPos[2] < 0.0) return true; 
+			if (modelPos < 0.0) return true; 
 		}
 		return false;
 	}
@@ -207,13 +210,11 @@ class ActionSearchEngineWreck : ActionContinuousBase
 		}
 
 		HUSHazardServerManager.ProcessSearch(player, targetObj, "wreck_engine");
-		ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+		{
+			ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		}
 	}
-};
-
-class ActionSearchTrunkWreckCB : ActionContinuousBaseCB
-{
-	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
 };
 
 class ActionSearchTrunkWreck : ActionContinuousBase
@@ -232,15 +233,18 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 		string typeName = targetObj.GetType(); typeName.ToLower();
 		if (typeName.Contains("wreck") || typeName.Contains("volha") || typeName.Contains("offroad"))
 		{
+			if (!ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+			{
+				ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns = new map<string, int>();
+			}
+
 			string uniqueCooldownKey = targetObj.GetID().ToString() + "_trunk";
 			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 			{
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
-			
-			// Сравниваем строго продольную ось Z сзади багажника!
-			if (modelPos[2] >= 0.0) return true; 
+			if (modelPos >= 0.0) return true; 
 		}
 		return false;
 	}
@@ -260,7 +264,10 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 		}
 
 		HUSHazardServerManager.ProcessSearch(player, targetObj, "wreck_trunk");
-		ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+		{
+			ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		}
 
 		ref Param1<string> rpcKeyParam = new Param1<string>("wreck_trunk");
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
@@ -268,7 +275,7 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 };
 
 // ----------------------------------------------------------------------------
-// ЧАСТЬ 4: ХАРДКОРНЫЙ БOЕВOЙ ФИЛЬТР ЗOМБИ (ИСПРАВЛЕНО ДЛЯ DAYZ 1.29)
+// ЧАСТЬ 4: ХАРДКОРНЫЙ БOЕВOЙ ФИЛЬТР ЗOМБИ (API DAYZ 1.29)
 // ----------------------------------------------------------------------------
 modded class DayZPlayerMeleeFightLogic_LightHeavy
 {
@@ -280,7 +287,6 @@ modded class DayZPlayerMeleeFightLogic_LightHeavy
 			return;
 		}
 
-		// Перехватываем логику, ТОЛЬКО если игрок бьет зомби (зараженного)
 		if (target.IsInherited(ZombieBase))
 		{
 			if (m_MeleeCombat.GetFinisherType() > -1)
@@ -289,31 +295,25 @@ modded class DayZPlayerMeleeFightLogic_LightHeavy
 				return;
 			}
 
-			// Извлекаем строковое имя зоны через ванильный индекс компонента!
 			int currentHitZoneIdx = m_MeleeCombat.GetHitZoneIdx();
 			string zoneName = target.GetActionComponentName(currentHitZoneIdx);
 			string lowerZone = zoneName; lowerZone.ToLower();
 
-			// 1. ТЗ: ПОЛНОЕ ОТКЛЮЧЕНИЕ УРОНА КУЛАКАМИ ПО ЗОМБИ
 			if (!weapon)
 			{
 				DamageSystem.CloseCombatDamage(m_Player, target, currentHitZoneIdx, "Dummy_Light", target.GetPosition(), ProcessDirectDamageFlags.NO_ATTACHMENT_TRANSFER);
 				return;
 			}
 
-			// 2. ТЗ: ПОЛНОЕ ОТКЛЮЧЕНИЕ УРОНА ХОЛОДНЫМ ОРУЖИЕМ ПО ТЕЛУ (Все зоны, КРОМЕ головы)
 			if (weapon && lowerZone != "head" && lowerZone != "neck")
 			{
 				DamageSystem.CloseCombatDamage(m_Player, target, currentHitZoneIdx, "Dummy_Light", target.GetPosition(), ProcessDirectDamageFlags.NO_ATTACHMENT_TRANSFER);
 				return;
 			}
 
-			// 3. ТЗ: МЕХАНИКА ВАНШОТА ИЛИ ОГРАНИЧЕНИЯ УРОНА СТРОГО В ГОЛОВУ
 			if (lowerZone == "head" || lowerZone == "neck")
 			{
 				string itemType = weapon.GetType();
-				
-				// ХАРДКОРНЫЙ БЕЛЫЙ СПИСОК ОРУЖИЯ ДЛЯ ВАНШОТА В ЧЕРЕП:
 				if (itemType == "FirefighterAxe" || itemType == "Crowbar" || itemType == "PipeWrench" || itemType == "NailedBaseballBat" || itemType == "BarbedBaseballBat" || itemType == "WoodAxe")
 				{
 					super.EvaluateHit_Common(weapon, target, forcedDummy, forcedWeaponMode);
@@ -332,5 +332,33 @@ modded class DayZPlayerMeleeFightLogic_LightHeavy
 		}
 
 		super.EvaluateHit_Common(weapon, target, forcedDummy, forcedWeaponMode);
+	}
+}
+
+// ----------------------------------------------------------------------------
+// РЕЛЬСА №5: ИСПРАВЛЕННЫЙ БЛОК ДВОЙНОЙ РЕГИСТРАЦИИ ЭКШЕНОВ (ПОРЯДОК DAYZ 1.29)
+// ----------------------------------------------------------------------------
+modded class ActionConstructor
+{
+	override void RegisterActions(TTypenameArray actions)
+	{
+		super.RegisterActions(actions);
+		actions.Insert(ActionSearchHazard);     
+		actions.Insert(ActionSearchFurniture);  
+		actions.Insert(ActionSearchTrunkWreck);   
+		actions.Insert(ActionSearchEngineWreck);  
+	}
+};
+
+modded class PlayerBase
+{
+	// ИСПРАВЛЕНО ДЛЯ 1.29: Метод SetActions приведен в идеальный нулевой вид без ложных стрингов!
+	override void SetActions()
+	{
+		super.SetActions();
+		AddAction(ActionSearchHazard);
+		AddAction(ActionSearchFurniture);
+		AddAction(ActionSearchTrunkWreck);   
+		AddAction(ActionSearchEngineWreck);  
 	}
 }
