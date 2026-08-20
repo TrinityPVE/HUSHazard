@@ -99,7 +99,7 @@ class ActionSearchHazard : ActionContinuousBase
 };
 
 // ----------------------------------------------------------------------------
-// ЧАСТЬ 2: МЕБЕЛЬНЫЙ СЕКТОР (ШКАФЫ И ИНТЕРЬЕРЫ)
+// ЧАСТЬ 2: МЕБЕЛЬНЫЙ СЕКТОР (СТРОГАЯ ПРОВЕРКА НА ИМЯ И НОМЕР КОМПОНЕНТА)
 // ----------------------------------------------------------------------------
 class ActionSearchFurniture : ActionContinuousBase
 {
@@ -114,17 +114,26 @@ class ActionSearchFurniture : ActionContinuousBase
 		Object targetObj = target.GetObject();
 		if (!targetObj) return false;
 		
+		// Извлекаем точный числовой индекс компонента (номер)
 		int componentIndex = target.GetComponentIndex();
+		if (componentIndex < 0) return false;
+
+		// Считываем точное текстовое название компонента (component_1, door_1 и т.д.)
 		string selectionName = targetObj.GetActionComponentName(componentIndex);
 		if (selectionName == string.Empty) return false;
 		selectionName.ToLower();
 
-		string typeName = targetObj.GetType(); typeName.ToLower();
-		
-		if (typeName.Contains("cupboard") || typeName.Contains("shelves") || typeName.Contains("table") || typeName.Contains("dresser") || typeName.Contains("wardrobe") || typeName.Contains("refrigerator") || typeName.Contains("sideboard") || typeName.Contains("bookcase") || typeName.Contains("cabinet"))
+		// ЖЕСТКИЙ ФИЛЬТР КОМПОНЕНТОВ: Проверяем, содержит ли имя компонента ключевые слова мебели
+		if (selectionName.Contains("component") || selectionName.Contains("door") || selectionName.Contains("drawer") || selectionName.Contains("shaf") || selectionName.Contains("box") || selectionName.Contains("lodka"))
 		{
-			string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
-			if (m_HH_GlobalFurnitureCooldowns && m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+			if (!m_HH_GlobalFurnitureCooldowns)
+			{
+				m_HH_GlobalFurnitureCooldowns = new map<string, int>();
+			}
+
+			// ПРИВЯЗКА К СВЯЗКЕ ИД ОБЪЕКТА + НОМЕР КОМПОНЕНТА: Позволяет разделять ящики в одной стене
+			string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName + "_" + componentIndex.ToString();
+			if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 			{
 				if (GetGame().GetTime() < m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
@@ -150,7 +159,8 @@ class ActionSearchFurniture : ActionContinuousBase
 			gloves.DecreaseHealth("", "", 6.0);
 		}
 
-		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
+		// Записываем кулдаун строго на этот номер компонента
+		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName + "_" + componentIndex.ToString();
 		HUSHazardServerManager.ProcessSearch(action_data.m_Player, targetObj, selectionName);
 		if (m_HH_GlobalFurnitureCooldowns)
 		{
@@ -159,7 +169,7 @@ class ActionSearchFurniture : ActionContinuousBase
 	}
 };
 // ----------------------------------------------------------------------------
-// ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР (КАПОТЫ И БАГАЖНИКИ ОСТОВОВ МАШИН)
+// ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР И ОБЫСК ЗОМБИ (ЖЕСТКИЕ КООРДИНАТЫ modelPos)
 // ----------------------------------------------------------------------------
 class ActionSearchEngineWreck : ActionContinuousBase
 {
@@ -169,6 +179,9 @@ class ActionSearchEngineWreck : ActionContinuousBase
 
 	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
 	{
+		// НАДПИСЬ ПОЯВЛЯЕТСЯ ТОЛЬКО ЕСЛИ В РУКАХ РАЗВОДНОЙ КЛЮЧ
+		if (!item || item.GetType() != "PipeWrench") return false;
+
 		Object targetObj = target.GetObject();
 		if (!targetObj) targetObj = target.GetParent();
 		if (!targetObj) return false;
@@ -188,7 +201,9 @@ class ActionSearchEngineWreck : ActionContinuousBase
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
-			if (modelPos < 0.0) return true; 
+			
+			// ИСПРАВЛЕНО: Индекс оси Z modelPos возвращен синтаксически верно
+			if (modelPos[2] < 0.0) return true; 
 		}
 		return false;
 	}
@@ -244,7 +259,9 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
-			if (modelPos >= 0.0) return true; 
+			
+			// ИСПРАВЛЕНО: Индекс оси Z modelPos возвращен
+			if (modelPos[2] >= 0.0) return true; 
 		}
 		return false;
 	}
@@ -271,6 +288,53 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 
 		ref Param1<string> rpcKeyParam = new Param1<string>("wreck_trunk");
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
+	}
+};
+
+class ActionSearchZombie : ActionContinuousBase
+{
+	void ActionSearchZombie() { m_CallbackClass = ActionSearchHazardCB; m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; m_FullBody = true; m_Text = "Обыскать тело"; m_LockTargetOnUse = false; }
+	override typename GetInputType() { return ContinuousInteractActionInput; }
+	override void CreateConditionComponents() { m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT); m_ConditionItem = new CCINone(); }
+
+	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
+	{
+		Object targetObj = target.GetObject();
+		if (!targetObj) return false;
+
+		ZombieBase zombie = ZombieBase.Cast(targetObj);
+		if (zombie && !zombie.IsAlive())
+		{
+			if (!ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+			{
+				ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns = new map<string, int>();
+			}
+
+			string uniqueCooldownKey = zombie.GetID().ToString() + "_zombie";
+			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+			{
+				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	override void OnFinishProgressServer(ActionData action_data)
+	{
+		super.OnFinishProgressServer(action_data);
+		if (!action_data || !action_data.m_Player || !action_data.m_Target) return;
+
+		ZombieBase zombie = ZombieBase.Cast(action_data.m_Target.GetObject());
+		if (!zombie) return;
+
+		HUSHazardServerManager.ProcessSearch(action_data.m_Player, zombie, "dead_zombie");
+
+		string uniqueCooldownKey = zombie.GetID().ToString() + "_zombie";
+		if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns)
+		{
+			ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+		}
 	}
 };
 
@@ -336,7 +400,7 @@ modded class DayZPlayerMeleeFightLogic_LightHeavy
 }
 
 // ----------------------------------------------------------------------------
-// РЕЛЬСА №5: ИСПРАВЛЕННЫЙ БЛОК ДВОЙНОЙ РЕГИСТРАЦИИ ЭКШЕНОВ (ПОРЯДОК DAYZ 1.29)
+// РЕЛЬСА №5: ИСПРАВЛЕННЫЙ БЛОК ДВОЙНОЙ РЕГИСТРАЦИИ ЭКШЕНОВ С УЧЕТОМ ЗОМБИ
 // ----------------------------------------------------------------------------
 modded class ActionConstructor
 {
@@ -345,20 +409,8 @@ modded class ActionConstructor
 		super.RegisterActions(actions);
 		actions.Insert(ActionSearchHazard);     
 		actions.Insert(ActionSearchFurniture);  
+		actions.Insert(ActionSearchZombie); 
 		actions.Insert(ActionSearchTrunkWreck);   
 		actions.Insert(ActionSearchEngineWreck);  
 	}
 };
-
-modded class PlayerBase
-{
-	// ИСПРАВЛЕНО ДЛЯ 1.29: Метод SetActions приведен в идеальный нулевой вид без ложных стрингов!
-	override void SetActions()
-	{
-		super.SetActions();
-		AddAction(ActionSearchHazard);
-		AddAction(ActionSearchFurniture);
-		AddAction(ActionSearchTrunkWreck);   
-		AddAction(ActionSearchEngineWreck);  
-	}
-}
