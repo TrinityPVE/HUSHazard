@@ -143,26 +143,29 @@ class ActionSearchHazard : ActionContinuousBase
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
 	}
 };
-// ----------------------------------------------------------------------------
-// ЧАСТЬ 2: МЕБЕЛЬНЫЙ СЕКТОР (РОДНОЙ МЕТОД, КОТОРЫЙ РАБОТАЛ НА 100%)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// ЧАСТЬ 2: СНАЙПЕРСКИЙ ОБЫСК МЕБЕЛИ ВНУТРИ ДОМОВ (ГЛОБАЛЬНЫЙ КУЛДАУН ПО ID)
+// ============================================================================
 class ActionSearchFurniture : ActionContinuousBase
 {
-	static ref map<string, int> m_HH_GlobalFurnitureCooldowns = new map<string, int>;
+	static ref map<string, int> m_HH_GlobalFurnitureCooldowns = new map<string, int>();
+	const int FURNITURE_COOLDOWN_TIME = 3600;
 
 	void ActionSearchFurniture()
 	{
 		m_CallbackClass = ActionSearchFurnitureCB;
-		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING;
+		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; // ТИХАЯ СТОЯЧАЯ АНИМАЦИЯ
 		m_FullBody = true;
-		m_Text = "Обыскать";
-		m_LockTargetOnUse = false;
+		m_Text = "Обыскать"; 
+		m_LockTargetOnUse = false; 
 	}
+	
+	override int GetActionCategory() { return AC_INTERACT; }
 
-	override typename GetInputType()
-	{
-		return ContinuousInteractActionInput;
-	}
+	override bool CanBeUsedOnBack() { return false; }
+	override bool IsLockTargetOnUse() { return false; }
+	override typename GetInputType() { return ContinuousInteractActionInput; }
+	override bool HasTarget() { return true; }
 
 	override void CreateConditionComponents()
 	{
@@ -172,64 +175,121 @@ class ActionSearchFurniture : ActionContinuousBase
 
 	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
 	{
+		HumanMovementState movementState = new HumanMovementState();
+		player.GetMovementState(movementState);
+		if (movementState.m_iStanceIdx == DayZPlayerConstants.STANCEIDX_PRONE) return false;
+
 		Object targetObj = target.GetObject();
+		if (!targetObj) targetObj = target.GetParent();
 		if (!targetObj) return false;
-		
-		int componentIndex = target.GetComponentIndex();
-		string selectionName = targetObj.GetActionComponentName(componentIndex);
-		if (selectionName == string.Empty) return false;
-		selectionName.ToLower();
 
-		if (selectionName.Contains("component") || selectionName.Contains("door") || selectionName.Contains("drawer") || selectionName.Contains("shaf") || selectionName.Contains("box") || selectionName.Contains("lodka"))
+		string typeName = targetObj.GetType();
+		typeName.ToLower();
+		if (typeName.Contains("zmb") || typeName.Contains("corpse")) return false;
+		if (typeName.Contains("wreck") || typeName.Contains("volha") || typeName.Contains("offroad")) return false;
+
+		if (targetObj.IsInherited(House) || targetObj.IsInherited(Building))
 		{
-			vector playerLocalPos = targetObj.WorldToModel(player.GetPosition());
-			if (vector.Distance(playerLocalPos, target.GetCursorHitPos()) > 1.8)
-				return false;
-
-			string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
-			if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+			int compIdx = target.GetComponentIndex();
+			if (compIdx != -1)
 			{
-				if (GetGame().GetTime() < m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey))
-					return false;
+				string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
+				int currentTime = GetGame().GetTime();
+
+				if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
+				{
+					int cooldownEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
+					if (currentTime < cooldownEndTime) return false;
+					else if (GetGame().IsServer()) m_HH_GlobalFurnitureCooldowns.Remove(uniqueCooldownKey);
+				}
+
+				vector worldHitPos = target.GetCursorHitPos();
+				if (worldHitPos != vector.Zero)
+				{
+					vector localHitPos = targetObj.WorldToModel(worldHitPos);
+					string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
+					
+					if (matrixCategory != string.Empty) 
+					{
+						// ТЗ: ЖЕСТКИЙ ЗАМОК НА АПТЕЧКИ БЕЗ ПЕРЧАТОК
+						if (matrixCategory == "medical")
+						{
+							if (!player || !player.GetInventory()) return false;
+							EntityAI checkGloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
+							
+							// Если у игрока нет перчаток или они порваны — полностью скрываем надпись «Обыскать»
+							if (!checkGloves || checkGloves.IsRuined())
+							{
+								return false;
+							}
+						}
+						return true; 
+					}
+				}
 			}
-			return true;
 		}
 		return false;
 	}
-	
+
 	override void OnFinishProgressServer(ActionData action_data)
 	{
-		if (!action_data || !action_data.m_Player || !action_data.m_Target) return;
-		
 		PlayerBase player = action_data.m_Player;
 		Object targetObj = action_data.m_Target.GetObject();
-		if (!targetObj) return;
+		if (!targetObj) targetObj = action_data.m_Target.GetParent();
+		if (!player || !targetObj) return;
 
-		int componentIndex = action_data.m_Target.GetComponentIndex();
-		string selectionName = targetObj.GetActionComponentName(componentIndex);
-		selectionName.ToLower();
+		int compIdx = action_data.m_Target.GetComponentIndex();
+		vector worldHitPos = action_data.m_Target.GetCursorHitPos();
+		if (worldHitPos == vector.Zero || compIdx == -1) return;
 
-		// НАКАЗАНИЕ НА СЕРВЕРЕ ПРИ ОБЫСКЕ МЕБЕЛИ БЕЗ ПЕРЧАТОК
-		EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
-		if (!gloves || gloves.IsRuined())
+		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
+
+		if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 		{
-			player.SetBloodyHands(true);
-			if (player.GetBleedingManagerServer())
+			int checkEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
+			if (GetGame().GetTime() < checkEndTime) return; 
+		}
+
+		int endTime = GetGame().GetTime() + (FURNITURE_COOLDOWN_TIME * 1000);
+		m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, endTime);
+
+		vector localHitPos = targetObj.WorldToModel(worldHitPos);
+		string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
+		
+		if (matrixCategory != string.Empty)
+		{
+			// НАКАЗАНИЕ НА СЕРВЕРЕ ПРИ ОБЫСКЕ ОБЫЧНОЙ МЕБЕЛИ БЕЗ ПЕРЧАТОК (РУКИ ОСТАЮТСЯ ЧИСТЫМИ)
+			EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
+			if (!gloves || gloves.IsRuined())
 			{
-				player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
-				player.MessageAction("[HUSHazard]: Ай! Вы сильно порезали незащищенную руку о занозу в шкафу!");
-			}
-		}
-		else
-		{
-			gloves.DecreaseHealth("", "", 6.0);
-		}
+				if (Math.RandomFloat01() < 0.30) // Шанс 30% на получение глубокого пореза об обломки мебели
+				{
+					if (player.GetBleedingManagerServer())
+					{
+						player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
+						player.MessageAction("[HUSHazard]: Вы сильно загнали занозу под кожу при обыске шкафа!");
+					}
 
-		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + selectionName;
-		HUSHazardServerManager.ProcessSearch(player, targetObj, selectionName);
-		m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, GetGame().GetTime() + 3600000);
+					// СВЕРЕНО С КАТАЛОГОМ ВАШЕГО РЕПОЗИТОРИЯ 1.29: Заносим строго eAgents.WOUND_AGENT
+					player.InsertAgent(eAgents.WOUND_AGENT, 100); 
+					if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31))
+					{
+						player.GetModifiersManager().ActivateModifier(31); 
+					}
+					player.MessageAction("[HUSHazard]: В открытую рану попала грязь. Начинается заражение!");
+				}
+			}
+			else
+			{
+				gloves.DecreaseHealth("", "", 6.0);
+			}
+
+			// Передаем имя найденной в HH_Config категории строкой напрямую в менеджер лута
+			HUSHazardServerManager.ProcessSearch(player, targetObj, matrixCategory);
+		}
 	}
 };
+
 // ----------------------------------------------------------------------------
 // ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР (СВЕРЕНО С ВАНИЛЬНЫМ API DAYZ 1.29)
 // ----------------------------------------------------------------------------
