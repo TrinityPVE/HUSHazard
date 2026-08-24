@@ -144,7 +144,7 @@ class ActionSearchHazard : ActionContinuousBase
 	}
 };
 // ============================================================================
-// ЧАСТЬ 2: СНАЙПЕРСКИЙ ОБЫСК МЕБЕЛИ ВНУТРИ ДОМОВ (ГЛОБАЛЬНЫЙ КУЛДАУН ПО ID)
+// ЧАСТЬ 2: СНАЙПЕРСКИЙ ОБЫСК МЕБЕЛИ (ИСПРАВЛЕНО — СТЕРИЛЬНЫЙ ТЕКСТОВЫЙ ОБХОД)
 // ============================================================================
 class ActionSearchFurniture : ActionContinuousBase
 {
@@ -183,8 +183,7 @@ class ActionSearchFurniture : ActionContinuousBase
 		if (!targetObj) targetObj = target.GetParent();
 		if (!targetObj) return false;
 
-		string typeName = targetObj.GetType();
-		typeName.ToLower();
+		string typeName = targetObj.GetType(); typeName.ToLower();
 		if (typeName.Contains("zmb") || typeName.Contains("corpse")) return false;
 		if (typeName.Contains("wreck") || typeName.Contains("volha") || typeName.Contains("offroad")) return false;
 
@@ -200,7 +199,6 @@ class ActionSearchFurniture : ActionContinuousBase
 				{
 					int cooldownEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
 					if (currentTime < cooldownEndTime) return false;
-					else if (GetGame().IsServer()) m_HH_GlobalFurnitureCooldowns.Remove(uniqueCooldownKey);
 				}
 
 				vector worldHitPos = target.GetCursorHitPos();
@@ -208,22 +206,11 @@ class ActionSearchFurniture : ActionContinuousBase
 				{
 					vector localHitPos = targetObj.WorldToModel(worldHitPos);
 					string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
-					
 					if (matrixCategory != string.Empty) 
 					{
-						// ТЗ: ЖЕСТКИЙ ЗАМОК НА АПТЕЧКИ БЕЗ ПЕРЧАТОК
-						if (matrixCategory == "medical")
-						{
-							if (!player || !player.GetInventory()) return false;
-							EntityAI checkGloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
-							
-							// Если у игрока нет перчаток или они порваны — полностью скрываем надпись «Обыскать»
-							if (!checkGloves || checkGloves.IsRuined())
-							{
-								return false;
-							}
-						}
-						return true; 
+						// ТЗ: Проверяем белый список предметов как категорию. Если false — тушим надпись!
+						if (!HUSHazardServerManager.PlayerHasValidToolForCategory(matrixCategory, item)) return false;
+						return true;
 					}
 				}
 			}
@@ -242,8 +229,15 @@ class ActionSearchFurniture : ActionContinuousBase
 		vector worldHitPos = action_data.m_Target.GetCursorHitPos();
 		if (worldHitPos == vector.Zero || compIdx == -1) return;
 
-		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
+		vector localHitPos = targetObj.WorldToModel(worldHitPos);
+		string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
+		if (matrixCategory == string.Empty) return;
 
+		// СЕРВЕРНЫЙ РУБЕЖ: Защита от пинга дублирует проверку по нашей категории
+		if (!HUSHazardServerManager.PlayerHasValidToolForCategory(matrixCategory, action_data.m_MainItem)) return;
+
+		// Кулдаун запишется ТОЛЬКО ПОСЛЕ успешного прохождения проверки категории инструментов
+		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
 		if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
 		{
 			int checkEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
@@ -253,40 +247,38 @@ class ActionSearchFurniture : ActionContinuousBase
 		int endTime = GetGame().GetTime() + (FURNITURE_COOLDOWN_TIME * 1000);
 		m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, endTime);
 
-		vector localHitPos = targetObj.WorldToModel(worldHitPos);
-		string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
-		
-		if (matrixCategory != string.Empty)
+		bool bIsMedicalSafe = false;
+		if (matrixCategory == "medical" || matrixCategory.Contains("safe") || matrixCategory.Contains("lock") || matrixCategory.Contains("cabinet")) bIsMedicalSafe = true;
+
+		EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
+		if (!gloves || gloves.IsRuined())
 		{
-			// НАКАЗАНИЕ НА СЕРВЕРЕ ПРИ ОБЫСКЕ ОБЫЧНОЙ МЕБЕЛИ БЕЗ ПЕРЧАТОК (РУКИ ОСТАЮТСЯ ЧИСТЫМИ)
-			EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
-			if (!gloves || gloves.IsRuined())
+			if (bIsMedicalSafe)
 			{
-				if (Math.RandomFloat01() < 0.30) // Шанс 30% на получение глубокого пореза об обломки мебели
+				if (Math.RandomFloat01() < 0.30) 
 				{
 					if (player.GetBleedingManagerServer())
 					{
 						player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
-						player.MessageAction("[HUSHazard]: Вы сильно загнали занозу под кожу при обыске шкафа!");
+						player.MessageAction("[HUSHazard]: Вы сильно порезали ладонь о металлические зазубрины взломанного замка аптечки!");
 					}
 
-					// СВЕРЕНО С КАТАЛОГОМ ВАШЕГО РЕПОЗИТОРИЯ 1.29: Заносим строго eAgents.WOUND_AGENT
 					player.InsertAgent(eAgents.WOUND_AGENT, 100); 
 					if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31))
 					{
 						player.GetModifiersManager().ActivateModifier(31); 
 					}
-					player.MessageAction("[HUSHazard]: В открытую рану попала грязь. Начинается заражение!");
+					player.MessageAction("[HUSHazard]: В рану попала грязь. Развивается заражение крови!");
 				}
 			}
-			else
-			{
-				gloves.DecreaseHealth("", "", 6.0);
-			}
-
-			// Передаем имя найденной в HH_Config категории строкой напрямую в менеджер лута
-			HUSHazardServerManager.ProcessSearch(player, targetObj, matrixCategory);
 		}
+		else
+		{
+			if (bIsMedicalSafe) gloves.DecreaseHealth("", "", 3.0); 
+			else gloves.DecreaseHealth("", "", 6.0); 
+		}
+
+		HUSHazardServerManager.ProcessSearch(player, targetObj, matrixCategory);
 	}
 };
 
@@ -521,7 +513,7 @@ class ActionSearchZombie : ActionContinuousBase
 		EntityAI maskItem = player.GetInventory().FindAttachment(maskSlotId);
 		if (!maskItem || maskItem.IsDamageDestroyed())
 		{
-			player.InsertAgent(eAgents.CHOLERA, 1000); 
+			
 			player.GetSymptomManager().QueueUpPrimarySymptom(SymptomIDs.SYMPTOM_VOMIT); 
 			player.MessageAction("[HUSHazard]: Вдохнув трупные газы без маски, вас выворачивает наизнанку!");
 		}
@@ -568,7 +560,7 @@ modded class DayZPlayerMeleeFightLogic_LightHeavy
 			if (lowerZone == "head" || lowerZone == "neck")
 			{
 				string itemType = weapon.GetType();
-				if (itemType == "FirefighterAxe" || itemType == "Crowbar" || itemType == "PipeWrench" || itemType == "NailedBaseballBat" || itemType == "BarbedBaseballBat" || itemType == "WoodAxe")
+				if (itemType == "FirefighterAxe" || itemType == "WoodAxe" || itemType == "Hatchet" || itemType == "Sledgehammer" || itemType == "Pickaxe" || itemType == "Crowbar" || itemType == "PipeWrench" || itemType == "NailedBaseballBat" || itemType == "BarbedBaseballBat")
 				{
 					super.EvaluateHit_Common(weapon, target, forcedDummy, forcedWeaponMode);
 					ZombieBase zomb = ZombieBase.Cast(target);
