@@ -831,6 +831,53 @@ class HUSHazardServerManager
 		ref Param1<string> rpcKeyParam = new Param1<string>(uniqueCooldownKey);
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
 	}
+
+// ============================================================================
+// ГЛОБАЛЬНАЯ КАТЕГОРИЯ БЕЛОГО СПИСКА ИНСТРУМЕНТОВ ВЗЛОМА TRINITYPVE
+// ============================================================================
+static ref array<string> m_ValidTools;
+
+static bool PlayerHasValidToolForCategory(string categoryName, ItemBase itemInHands)
+{
+	bool bIsLockedCabinet = false;
+	if (categoryName == "medical" || categoryName.Contains("safe") || categoryName.Contains("lock") || categoryName.Contains("cabinet")) bIsLockedCabinet = true;
+
+	// Если шкаф открытый (обычная тумбочка) — голые руки разрешены всегда (true)
+	if (!bIsLockedCabinet) return true;
+
+	// ТЗ: Если шкаф заперт, а в руках у персонажа АБСОЛЮТНО ПУСТО — запрещаем появление надписи (false)
+	if (!itemInHands) return false;
+
+	// Инициализируем категорию белого списка при самом первом обращении к серверу
+	if (!m_ValidTools)
+	{
+		m_ValidTools = new array<string>;
+		m_ValidTools.Insert("Crowbar");
+		m_ValidTools.Insert("Axe");
+		m_ValidTools.Insert("Sledgehammer");
+		m_ValidTools.Insert("Pickaxe");
+		m_ValidTools.Insert("Hatchet");
+		m_ValidTools.Insert("Pipe");
+	}
+
+	string currentToolType = itemInHands.GetType();
+
+	// Проверяем, содержит ли наша категория базовый тип инструмента в руках
+	for (int i = 0; i < m_ValidTools.Count(); i++)
+	{
+		if (currentToolType.Contains(m_ValidTools.Get(i)) || currentToolType == m_ValidTools.Get(i))
+		{
+			return true; // Инструмент совпал с белым списком — разрешаем обыск!
+		}
+	}
+
+	// ТЗ: Если в руках предмет, не прошедший проверку по категории — возвращаем false!
+	return false;
+}
+
+
+
+
 };
 
 
