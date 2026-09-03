@@ -1,10 +1,51 @@
 // ============================================================================
-// HUSHazard - Player Core (Patched for DayZ 1.29 — СТЕРИЛЬНЫЙ СЕРВЕРНЫЙ УРОН)
+// HUSHazard - Player Core (Patched for DayZ 1.29 — СИНХРОНИЗАЦИЯ ЗВУКОВ И УРОН)
 // ============================================================================
 
 modded class PlayerBase
 {
-	// Тотальное оригинальное наказание игрока при любом попадании лапы зомби (СВЕРЕНО С ВАНИЛЬНЫМ API 1.29)
+	// Флаг замены звуков анимации обыска багажника на кастомный hh_trunk.ogg
+	protected bool m_HH_SoundReplace = false;
+
+	// Конструктор класса: инициализация базовых С++ сетевых переменных
+	void PlayerBase()
+	{
+		// РЕГИСТРАЦИЯ В С++ СЕТЕВОМ СЛОЕ: Синхронизируем переменную между клиентом и сервером
+		RegisterNetSyncVariableBool("m_HH_SoundReplace");
+	}
+
+	// ИСПРАВЛЕНО: Аргумент убран, метод полностью соответствует ванильному родителю DayZ 1.29
+	override void SetActions() 
+	{
+		super.SetActions();
+		
+		// Регистрация экшенов обыска мебели и автомобильного сектора HUSHazard
+		AddAction(ActionSearchFurniture);
+		AddAction(ActionSearchEngineWreck);
+		AddAction(ActionSearchTrunkWreck);
+	}
+
+	// Управляет флагом подмены звука с пушем сетевой «грязи» (ЭТАЛОН СТОРОННЕГО МОДА)
+	void SetHHSoundReplace(bool soundState)
+	{
+		if (m_HH_SoundReplace == soundState)
+			return;
+
+		m_HH_SoundReplace = soundState;
+
+		// Если это server — принудительно пушим сетевой пакет обновления для всех клиентов в стриме
+		if (GetGame().IsServer())
+			SetSynchDirty();
+	}
+
+	bool GetHHSoundReplace()
+	{
+		return m_HH_SoundReplace;
+	}
+
+	// ============================================================================
+	// СИСТЕМА УРОНА И ЗАРАЖЕНИЯ: ТОТАЛЬНОЕ ОРИГИНАЛЬНОЕ НАКАЗАНИЕ ИГРОКА ЗОМБИ
+	// ============================================================================
 	override void EEHitBy(TotalDamageResult damageResult, int damageType, EntityAI source, int component, string dmgZone, string ammo, vector modelPos, float speedCoef)
 	{
 		super.EEHitBy(damageResult, damageType, source, component, dmgZone, ammo, modelPos, speedCoef);
