@@ -608,12 +608,12 @@ class HUSHazardServerManager
 			int cooldownEndTime = ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(checkKey);
 			if (GetGame().GetTime() < cooldownEndTime)
 			{
-				// Изнашиваем перчатки на полные 6.0 единиц за спам по облутанным машинам/улице
+				// Изнашиваем перчатки на полные 2.0 единицы за спам по облутанным машинам/улице
 				EntityAI glovesOnCool = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
 				if (glovesOnCool && !glovesOnCool.IsRuined())
 				{
-					glovesOnCool.DecreaseHealth("", "", 6.0);
-					Print("[HUSHazard_Gloves]: Машина/Улица на кулдауне! Перчатки игрока изношены на 6 единиц.");
+					glovesOnCool.DecreaseHealth("", "", 1.0);
+					Print("[HUSHazard_Gloves]: Машина/Улица на кулдауне! Перчатки игрока изношены на 2 единицы.");
 				}
 
 				player.MessageAction("[HUSHazard]: Всё украдено до нас... Здесь уже абсолютно пусто.");
@@ -832,7 +832,7 @@ class HUSHazardServerManager
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
 	}
 
-// ============================================================================
+	// ============================================================================
 // ГЛОБАЛЬНАЯ КАТЕГОРИЯ БЕЛОГО СПИСКА ИНСТРУМЕНТОВ ВЗЛОМА TRINITYPVE
 // ============================================================================
 static ref array<string> m_ValidTools;
@@ -842,38 +842,98 @@ static bool PlayerHasValidToolForCategory(string categoryName, ItemBase itemInHa
 	bool bIsLockedCabinet = false;
 	if (categoryName == "medical" || categoryName.Contains("safe") || categoryName.Contains("lock") || categoryName.Contains("cabinet")) bIsLockedCabinet = true;
 
-	// Если шкаф открытый (обычная тумбочка) — голые руки разрешены всегда (true)
-	if (!bIsLockedCabinet) return true;
+	// ----------------============================================================
+	// СЦЕНАРИЙ 1: ШКАФ ОТКРЫТЫЙ (ИЛИ БАГАЖНИК МАШИНЫ) — ТРЕБУЮТСЯ СТРОГО ГОЛЫЕ РУКИ!
+	// ----------------============================================================
+	if (!bIsLockedCabinet)
+	{
+		if (!itemInHands) return true;
+		return false;
+	}
 
-	// ТЗ: Если шкаф заперт, а в руках у персонажа АБСОЛЮТНО ПУСТО — запрещаем появление надписи (false)
-	if (!itemInHands) return false;
+	// ----------------============================================================
+	// СЦЕНАРИЙ 2: ШКАФ ЗАПЕРТ (СЕЙФ/АПТЕЧКА) — ТРЕБУЕТСЯ ИНСТРУМЕНТ ИЗ БЕЛОГО СПИСКА
+	// ----------------============================================================
+	if (!itemInHands) return false; 
 
-	// Инициализируем категорию белого списка при самом первом обращении к серверу
 	if (!m_ValidTools)
 	{
 		m_ValidTools = new array<string>;
 		m_ValidTools.Insert("Crowbar");
-		m_ValidTools.Insert("Axe");
-		m_ValidTools.Insert("Sledgehammer");
+		m_ValidTools.Insert("FirefighterAxe"); // Строгое фабричное имя тяжелого топора
+		m_ValidTools.Insert("WoodAxe");        // Строгое фабричное имя тяжелого топора
+		m_ValidTools.Insert("SledgeHammer");
 		m_ValidTools.Insert("Pickaxe");
-		m_ValidTools.Insert("Hatchet");
-		m_ValidTools.Insert("Pipe");
+		m_ValidTools.Insert("PipeWrench");
 	}
 
 	string currentToolType = itemInHands.GetType();
 
-	// Проверяем, содержит ли наша категория базовый тип инструмента в руках
+	// Проверяем инструмент по нашей категории белого списка взлома
 	for (int i = 0; i < m_ValidTools.Count(); i++)
 	{
-		if (currentToolType.Contains(m_ValidTools.Get(i)) || currentToolType == m_ValidTools.Get(i))
+		// НАМЕРТВО ЗАФИКСИРОВАНО: Строгое побуквенное равенство типов '==' 
+		// Это полностью исключает ложный пропуск маленького Hatchet в запертые сейфы!
+		if (currentToolType == m_ValidTools.Get(i))
 		{
-			return true; // Инструмент совпал с белым списком — разрешаем обыск!
+			return true; 
 		}
 	}
 
-	// ТЗ: Если в руках предмет, не прошедший проверку по категории — возвращаем false!
 	return false;
 }
+
+	// ============================================================================
+	// ДОБАВИТЬ В САМЫЙ КОНЕЦ КЛАССА HUSHazardServerManager (ПЕРЕД ПОСЛЕДНЕЙ СКОБКОЙ)
+	// ============================================================================
+	
+	static bool IsHospitalTable(string typeName)
+	{
+		if (typeName.Contains("medical_table") || typeName.Contains("lab_bench") || typeName.Contains("hospital_transport")) return true;
+		return false;
+	}
+
+	static string GetFurnitureAudioTag(Object targetObj)
+	{
+		if (!targetObj) return "HH_Trunk_Search_SoundSet";
+		
+		string typeName = targetObj.GetType();
+		typeName.ToLower();
+
+		// а. Холодильники
+		if (typeName.Contains("fridge"))
+		{
+			return "HH_Fridge_Search_SoundSet";
+		}
+		
+		// б. Книжные шкафы и офисные стеллажи
+		if (typeName.Contains("library") || typeName.Contains("school") || typeName.Contains("shelf"))
+		{
+			return "HH_Books_Search_SoundSet";
+		}
+
+		// в. Шкафы для одежды и гардеробы
+		if (typeName.Contains("almara") || typeName.Contains("clothing") || typeName.Contains("case_bedroom"))
+		{
+			return "HH_Clothes_Search_SoundSet";
+		}
+
+		// г. Металлические шкафы, сейфы и аптечки
+		if (typeName.Contains("locker") || typeName.Contains("lekarnicka") || typeName.Contains("safe") || typeName.Contains("crate") || typeName.Contains("metalcase"))
+		{
+			return "HH_MetalCabinet_Search_SoundSet";
+		}
+
+		// д. Деревянные столы, доступные для взлома в больницах
+		if (IsHospitalTable(typeName) || typeName.Contains("table") || typeName.Contains("desk"))
+		{
+			return "HH_Table_Search_SoundSet";
+		}
+
+		// Откат по умолчанию для багажников машин
+		return "HH_Trunk_Search_SoundSet";
+	}
+
 
 
 
@@ -882,17 +942,61 @@ static bool PlayerHasValidToolForCategory(string categoryName, ItemBase itemInHa
 
 
 // ============================================================================
-// МОДУЛЬНЫЙ МОСТ 4_WORLD: СТОПРОЦЕНТНО СТАБИЛЬНЫЙ ЗАПУСК ЭКОНОМИКИ
+// МОДУЛЬНЫЙ МОСТ 4_WORLD: СТАБИЛЬНЫЙ ЗАПУСК ЭКОНОМИКИ И ПОЛНЫЙ РЕЕСТР ЭКШЕНОВ
 // ============================================================================
 modded class PlayerBase
 {
+	// 1. ВАШ ВАНИЛЬНЫЙ МЕТОД ИНИЦИАЛИЗАЦИИ ЭКОНОМИКИ И ОЧИСТКИ РУК ПРИ КРАШАХ
 	override void EEInit()
 	{
 		super.EEInit();
 		
 		if (GetGame().IsServer())
 		{
+			// Запуск автогенерации и загрузки вашей экономики лута
 			HUSHazardServerManager.Init();
+
+			// АБСОЛЮТНЫЙ ФИЛЬТР БЕЗОПАСНОСТИ: Защита от краша сервера во время обыска!
+			if (GetHumanInventory())
+			{
+				EntityAI itemInHands = GetHumanInventory().GetEntityInHands();
+				if (itemInHands && itemInHands.GetType() == "HH_InvisibleProxy_Item")
+				{
+					GetGame().ObjectDelete(itemInHands);
+				}
+			}
 		}
 	}
-};
+
+	// 2. ХАРДКОРНАЯ ПРОВЕРКА УСЛОВИЙ ТАКТИЧЕСКОГО КРИКА TRINITYPVE
+	bool HH_CanScream()
+	{
+		if (!IsAlive()) return false;
+		
+		// Крик доступен только если НЕТ перчаток
+		EntityAI gloves = GetInventory().FindAttachment(InventorySlots.GLOVES);
+		if (gloves && !gloves.IsDamageDestroyed()) return false;
+		
+		// Крик доступен только если НЕТ маски
+		EntityAI mask = GetInventory().FindAttachment(InventorySlots.MASK);
+		if (mask && !mask.IsDamageDestroyed()) return false;
+		
+		return true;
+	}
+
+	// 3. ВАШ ИСПРАВЛЕННЫЙ РЕЕСТР ОРИГИНАЛЬНЫХ ЭКШЕНОВ ОБЫСКА НА КЛАВИШУ "F" И КРИКА НА ЛКМ
+	override void SetActions()
+	{
+		super.SetActions();
+		
+		// Обыски объектов по кнопке F
+		AddAction(ActionSearchHazard);
+		AddAction(ActionSearchZombie);
+		AddAction(ActionSearchTrunkWreck);   
+		AddAction(ActionSearchEngineWreck);  
+		AddAction(ActionSearchFurniture);
+
+		// Регистрация кастомного экшена свиста на ЛКМ кулаками
+		AddAction(ActionHH_Scream);
+	}
+}
