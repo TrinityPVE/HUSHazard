@@ -634,4 +634,5 @@ class HUSHazardConfigHolder
 
 		return string.Empty;
 	}
+	
 };
