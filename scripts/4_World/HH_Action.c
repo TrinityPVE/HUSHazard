@@ -1,82 +1,116 @@
-// ============================================================================
-// HUSHazard - Action & Combat Core (Patched for DayZ 1.29 — СТЕРИЛЬНЫЙ ВОЗВРАТ)
-// ============================================================================
-
-class ActionSearchHazardCB : ActionContinuousBaseCB
+class ActionSearchFurnitureCB : ActionContinuousBaseCB
 {
 	override void CreateActionComponent()
 	{
-		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0);
+		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); // Время обыска мебели — 4 секунды
 	}
 };
 
-class ActionSearchFurnitureCB : ActionContinuousBaseCB
+
+
+
+class ActionSearchEngineWreckCB : ActionContinuousBaseCB
 {
-	protected EffectSound m_SearchSoundLoop;
+	protected EffectSound m_WrenchSound;
 
 	override void CreateActionComponent()
 	{
-		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0);
+		// 4 секунды плавного разбора мотора стоя в полный рост
+		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); 
 	}
 
 	override void InitActionComponent()
 	{
 		super.InitActionComponent();
+		
+		PlayerBase player = m_ActionData.m_Player;
+		if (!player) return;
+
 		if (GetGame().IsClient() || !GetGame().IsMultiplayer())
 		{
-			m_SearchSoundLoop = SEffectManager.PlaySoundOnObject("HH_Zombie_Search_SoundSet", m_ActionData.m_Player);
+			// Принудительно запускаем оригинальный сочный звук гаечного ключа из config.cpp
+			m_WrenchSound = SEffectManager.PlaySoundOnObject("HH_Wrench_Loop_SoundSet", player);
+			if (m_WrenchSound)
+			{
+				m_WrenchSound.SetSoundAutodestroy(true);
+				m_WrenchSound.SetSoundLoop(true);   // Зацикливание скрежета
+				m_WrenchSound.SetSoundVolume(3.5); // Сочная громкость
+			}
 		}
 	}
 
 	override void OnFinish(bool pCanceled)
 	{
 		super.OnFinish(pCanceled);
-		if (m_SearchSoundLoop)
+		if (m_WrenchSound) 
 		{
-			m_SearchSoundLoop.SoundStop();
+			m_WrenchSound.SoundStop(); // Чистая остановка звуковой петли ключа при отмене/финише
 		}
-	}
-};
-
-class ActionSearchEngineWreckCB : ActionContinuousBaseCB
-{
-	override void CreateActionComponent()
-	{
-		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0);
 	}
 };
 
 class ActionSearchTrunkWreckCB : ActionContinuousBaseCB
 {
+	protected EffectSound m_TrunkSound;
+
 	override void CreateActionComponent()
 	{
-		m_ActionData.m_ActionComponent = new CAContinuousTime(4.0);
+		// 1.5 секунды для идеального одиночного стоячего цикла рук
+		m_ActionData.m_ActionComponent = new CAContinuousTime(1.5); 
+	}
+
+	override void InitActionComponent()
+	{
+		super.InitActionComponent();
+		
+		PlayerBase player = m_ActionData.m_Player;
+		if (!player) return;
+
+		if (GetGame().IsClient() || !GetGame().IsMultiplayer())
+		{
+			// ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ПО ТЗ: Включаем ваш кастомный звук из config.cpp поверх немой анимации!
+			m_TrunkSound = SEffectManager.PlaySoundOnObject("action_interact_SoundSet", player);
+			if (m_TrunkSound)
+			{
+				m_TrunkSound.SetSoundAutodestroy(true);
+				m_TrunkSound.SetSoundLoop(true);   // Зацикливание эффекта
+				m_TrunkSound.SetSoundVolume(3.5); // Сочная, отчетливая громкость
+			}
+		}
+	}
+
+	override void OnFinish(bool pCanceled)
+	{
+		super.OnFinish(pCanceled);
+		if (m_TrunkSound) 
+		{
+			m_TrunkSound.SoundStop(); // Чистая остановка звуковой петли багажника при отмене/финише
+		}
 	}
 };
+
 // ----------------------------------------------------------------------------
 // ЧАСТЬ 1: УЛИЧНЫЙ СЕКТОР (КУРЯТНИКИ, БУДКИ, СУХИЕ ТУАЛЕТЫ)
 // ----------------------------------------------------------------------------
+// Стерильный изолированный коллбэк для улицы, исключающий конфликты линковки
+class ActionSearchHazardCB : ActionContinuousBaseCB
+{
+	override void CreateActionComponent() { m_ActionData.m_ActionComponent = new CAContinuousTime(4.0); }
+};
+
 class ActionSearchHazard : ActionContinuousBase
 {
 	void ActionSearchHazard()
 	{
-		m_CallbackClass = ActionSearchFurnitureCB;
+		m_CallbackClass = ActionSearchHazardCB; // ПРИВЯЗАНО К СВОЕМУ КЛАССУ
 		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING;
 		m_FullBody = true;
 		m_Text = "Обыскать";
 		m_LockTargetOnUse = false;
 	}
 
-	override typename GetInputType()
-	{
-		return ContinuousInteractActionInput;
-	}
-
-	override void CreateConditionComponents()
-	{
-		m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT);
-		m_ConditionItem = new CCINone();
-	}
+	override typename GetInputType() { return ContinuousInteractActionInput; }
+	override void CreateConditionComponents() { m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT); m_ConditionItem = new CCINone(); }
 
 	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
 	{
@@ -84,10 +118,10 @@ class ActionSearchHazard : ActionContinuousBase
 		if (!targetObj) targetObj = target.GetParent();
 		if (!targetObj) return false;
 
-		string typeName = targetObj.GetType();
-		typeName.ToLower();
+		string typeNameStr = targetObj.GetType();
+		typeNameStr.ToLower();
 
-		if (typeName.Contains("toilet") || typeName.Contains("kennel") || typeName.Contains("dog") || typeName.Contains("coop") || typeName.Contains("chicken"))
+		if (typeNameStr.Contains("toilet") || typeNameStr.Contains("kennel") || typeNameStr.Contains("dog") || typeNameStr.Contains("coop") || typeNameStr.Contains("chicken"))
 		{
 			string uniqueCooldownKey = targetObj.GetID().ToString() + "_street";
 			if (ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
@@ -110,10 +144,9 @@ class ActionSearchHazard : ActionContinuousBase
 		if (!targetObj) targetObj = action_data.m_Target.GetParent();
 		if (!targetObj) return;
 
-		string typeName = targetObj.GetType();
-		typeName.ToLower();
+		string typeNameStr = targetObj.GetType();
+		typeNameStr.ToLower();
 
-		// НАКАЗАНИЕ НА СЕРВЕРЕ ПРИ ОБЫСКЕ УЛИЦЫ БЕЗ ПЕРЧАТОК
 		EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
 		if (!gloves || gloves.IsRuined())
 		{
@@ -129,7 +162,7 @@ class ActionSearchHazard : ActionContinuousBase
 			gloves.DecreaseHealth("", "", 6.0);
 		}
 
-		string targetCategory = typeName;
+		string targetCategory = typeNameStr;
 		if (targetCategory.Contains("toilet"))       targetCategory = "toilet_dry";
 		else if (targetCategory.Contains("kennel") || targetCategory.Contains("dog")) targetCategory = "dog_kennel";
 		else if (targetCategory.Contains("coop")   || targetCategory.Contains("chicken")) targetCategory = "chicken_coop";
@@ -143,6 +176,7 @@ class ActionSearchHazard : ActionContinuousBase
 		GetGame().RPCSingleParam(player, 95202, rpcKeyParam, true, player.GetIdentity());
 	}
 };
+
 // ============================================================================
 // ЧАСТЬ 2: СНАЙПЕРСКИЙ ОБЫСК МЕБЕЛИ (ИСПРАВЛЕНО — СТЕРИЛЬНЫЙ ТЕКСТОВЫЙ ОБХОД)
 // ============================================================================
@@ -150,69 +184,136 @@ class ActionSearchFurniture : ActionContinuousBase
 {
 	static ref map<string, int> m_HH_GlobalFurnitureCooldowns = new map<string, int>();
 	const int FURNITURE_COOLDOWN_TIME = 3600;
+	protected EffectSound m_FurnitureCustomSound;
+	protected string m_HH_ClientAudioTag;
 
 	void ActionSearchFurniture()
 	{
 		m_CallbackClass = ActionSearchFurnitureCB;
-		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; // ТИХАЯ СТОЯЧАЯ АНИМАЦИЯ
-		m_FullBody = true;
+		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_INTERACT; // Ваша стабильная стоячая анимация рук
+		m_FullBody = true; 
+		m_StanceMask = DayZPlayerConstants.STANCEMASK_ALL;
 		m_Text = "Обыскать"; 
 		m_LockTargetOnUse = false; 
 	}
 	
 	override int GetActionCategory() { return AC_INTERACT; }
-
 	override bool CanBeUsedOnBack() { return false; }
 	override bool IsLockTargetOnUse() { return false; }
 	override typename GetInputType() { return ContinuousInteractActionInput; }
 	override bool HasTarget() { return true; }
 
-	override void CreateConditionComponents()
+	// СИНХРОННЫЙ КЛИЕНТСКИЙ СТАРТ ЗВУКА ИЗ ТЕКСТОВОГО МОСТА
+	override void OnStartClient(ActionData action_data)
 	{
-		m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT);
-		m_ConditionItem = new CCINone();
+		super.OnStartClient(action_data);
+		if (!action_data || !action_data.m_Player) return;
+
+		if (GetGame().IsClient() || !GetGame().IsMultiplayer())
+		{
+			string targetSoundSet = "HH_Trunk_Search_SoundSet"; // Откат по умолчанию
+
+			// СИНХРОНИЗАЦИЯ ПО ТЕКСТОВОМУ МОСТУ НА КЛИЕНТЕ:
+			if (m_HH_ClientAudioTag == "refrigerator")
+			{
+				targetSoundSet = "HH_Fridge_Search_SoundSet";
+			}
+			else if (m_HH_ClientAudioTag == "home_medical_cabinet" || m_HH_ClientAudioTag == "school_medical_box" || m_HH_ClientAudioTag == "village_medical_lockbox")
+			{
+				targetSoundSet = "HH_MetalCabinet_Search_SoundSet";
+			}
+			else if (m_HH_ClientAudioTag == "bookshelf" || m_HH_ClientAudioTag == "industrial_bookshelf" || m_HH_ClientAudioTag == "military_bookshelf" || m_HH_ClientAudioTag == "school_office")
+			{
+				targetSoundSet = "HH_Books_Search_SoundSet";
+			}
+			else if (m_HH_ClientAudioTag == "wardrobe" || m_HH_ClientAudioTag == "kitchen_sideboard" || m_HH_ClientAudioTag == "camp_house_wardrobe")
+			{
+				targetSoundSet = "HH_Clothes_Search_SoundSet";
+			}
+			else if (m_HH_ClientAudioTag == "police_weapon_rack" || m_HH_ClientAudioTag == "military_weapon_rack" || m_HH_ClientAudioTag == "hospital_medical_lockbox" || m_HH_ClientAudioTag == "industrial_wardrobe" || m_HH_ClientAudioTag == "fire_station_wardrobe")
+			{
+				targetSoundSet = "HH_MetalWardrobe_Search_SoundSet";
+			}
+			else if (m_HH_ClientAudioTag == "vending_drinks")
+			{
+				targetSoundSet = "HH_Table_Search_SoundSet";
+			}
+
+			m_FurnitureCustomSound = SEffectManager.PlaySoundOnObject(targetSoundSet, action_data.m_Player);
+			if (m_FurnitureCustomSound)
+			{
+				m_FurnitureCustomSound.SetSoundAutodestroy(true);
+				m_FurnitureCustomSound.SetSoundLoop(true);
+				m_FurnitureCustomSound.SetSoundVolume(3.5); 
+			}
+		}
 	}
+
+	override void OnEndClient(ActionData action_data)
+	{
+		super.OnEndClient(action_data);
+		if (m_FurnitureCustomSound) 
+		{
+			m_FurnitureCustomSound.SoundStop(); // Мгновенное гашение звука при нажатии Esc
+		}
+	}
+
+	override void OnStartServer(ActionData action_data)
+	{
+		super.OnStartServer(action_data);
+		if (action_data.m_Player && GetGame().IsServer())
+		{
+			EntityAI itemInHands = action_data.m_Player.GetHumanInventory().GetEntityInHands();
+			if (!itemInHands)
+			{
+				action_data.m_Player.GetHumanInventory().CreateInHands("HH_InvisibleProxy_Item");
+			}
+		}
+	}
+
+	override void OnEndServer(ActionData action_data)
+	{
+		super.OnEndServer(action_data);
+		if (action_data.m_Player && GetGame().IsServer())
+		{
+			EntityAI proxyItem = action_data.m_Player.GetHumanInventory().GetEntityInHands();
+			if (proxyItem && proxyItem.GetType() == "HH_InvisibleProxy_Item")
+			{
+				GetGame().ObjectDelete(proxyItem);
+			}
+		}
+	}
+
+	override void CreateConditionComponents() { m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT); m_ConditionItem = new CCINone(); }
 
 	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
 	{
-		HumanMovementState movementState = new HumanMovementState();
-		player.GetMovementState(movementState);
+		HumanMovementState movementState = new HumanMovementState(); player.GetMovementState(movementState);
 		if (movementState.m_iStanceIdx == DayZPlayerConstants.STANCEIDX_PRONE) return false;
 
-		Object targetObj = target.GetObject();
-		if (!targetObj) targetObj = target.GetParent();
-		if (!targetObj) return false;
+		Object targetObj = target.GetObject(); if (!targetObj) targetObj = target.GetParent();
+		if (!targetObj || (!targetObj.IsInherited(House) && !targetObj.IsInherited(Building))) return false;
 
-		string typeName = targetObj.GetType(); typeName.ToLower();
-		if (typeName.Contains("zmb") || typeName.Contains("corpse")) return false;
-		if (typeName.Contains("wreck") || typeName.Contains("volha") || typeName.Contains("offroad")) return false;
+		int compIdx = target.GetComponentIndex(); if (compIdx == -1) return false;
 
-		if (targetObj.IsInherited(House) || targetObj.IsInherited(Building))
+		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
+		if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey) && GetGame().GetTime() < m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
+
+		vector worldHitPos = target.GetCursorHitPos();
+		if (worldHitPos != vector.Zero)
 		{
-			int compIdx = target.GetComponentIndex();
-			if (compIdx != -1)
+			vector localHitPos = targetObj.WorldToModel(worldHitPos);
+			string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
+			if (matrixCategory != string.Empty) 
 			{
-				string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
-				int currentTime = GetGame().GetTime();
+				if (item && item.GetType() == "HH_InvisibleProxy_Item") return true;
+				if (!HUSHazardServerManager.PlayerHasValidToolForCategory(matrixCategory, item)) return false;
+				
+				// ПЕРЕДАЧА МАРКЕРА ЧЕРЕЗ СЕТЕВОЙ МОСТ: Фиксируем значение на клиенте и сервере одновременно!
+				m_HH_ClientAudioTag = matrixCategory;
+				m_HH_ClientAudioTag.ToLower();
 
-				if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
-				{
-					int cooldownEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
-					if (currentTime < cooldownEndTime) return false;
-				}
-
-				vector worldHitPos = target.GetCursorHitPos();
-				if (worldHitPos != vector.Zero)
-				{
-					vector localHitPos = targetObj.WorldToModel(worldHitPos);
-					string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
-					if (matrixCategory != string.Empty) 
-					{
-						// ТЗ: Проверяем белый список предметов как категорию. Если false — тушим надпись!
-						if (!HUSHazardServerManager.PlayerHasValidToolForCategory(matrixCategory, item)) return false;
-						return true;
-					}
-				}
+				return true;
 			}
 		}
 		return false;
@@ -221,8 +322,7 @@ class ActionSearchFurniture : ActionContinuousBase
 	override void OnFinishProgressServer(ActionData action_data)
 	{
 		PlayerBase player = action_data.m_Player;
-		Object targetObj = action_data.m_Target.GetObject();
-		if (!targetObj) targetObj = action_data.m_Target.GetParent();
+		Object targetObj = action_data.m_Target.GetObject(); if (!targetObj) targetObj = action_data.m_Target.GetParent();
 		if (!player || !targetObj) return;
 
 		int compIdx = action_data.m_Target.GetComponentIndex();
@@ -233,17 +333,9 @@ class ActionSearchFurniture : ActionContinuousBase
 		string matrixCategory = HUSHazardConfigHolder.GetFurnitureCategoryByVector(targetObj.GetType(), localHitPos);
 		if (matrixCategory == string.Empty) return;
 
-		// СЕРВЕРНЫЙ РУБЕЖ: Защита от пинга дублирует проверку по нашей категории
 		if (!HUSHazardServerManager.PlayerHasValidToolForCategory(matrixCategory, action_data.m_MainItem)) return;
 
-		// Кулдаун запишется ТОЛЬКО ПОСЛЕ успешного прохождения проверки категории инструментов
 		string uniqueCooldownKey = targetObj.GetID().ToString() + "_" + compIdx.ToString();
-		if (m_HH_GlobalFurnitureCooldowns.Contains(uniqueCooldownKey))
-		{
-			int checkEndTime = m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey);
-			if (GetGame().GetTime() < checkEndTime) return; 
-		}
-
 		int endTime = GetGame().GetTime() + (FURNITURE_COOLDOWN_TIME * 1000);
 		m_HH_GlobalFurnitureCooldowns.Set(uniqueCooldownKey, endTime);
 
@@ -257,18 +349,10 @@ class ActionSearchFurniture : ActionContinuousBase
 			{
 				if (Math.RandomFloat01() < 0.30) 
 				{
-					if (player.GetBleedingManagerServer())
-					{
-						player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
-						player.MessageAction("[HUSHazard]: Вы сильно порезали ладонь о металлические зазубрины взломанного замка аптечки!");
-					}
-
+					if (player.GetBleedingManagerServer()) player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
 					player.InsertAgent(eAgents.WOUND_AGENT, 100); 
-					if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31))
-					{
-						player.GetModifiersManager().ActivateModifier(31); 
-					}
-					player.MessageAction("[HUSHazard]: В рану попала грязь. Развивается заражение крови!");
+					if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31)) player.GetModifiersManager().ActivateModifier(31); 
+					player.MessageAction("[HUSHazard]: Вы сильно порезали ладонь о металлические зазубрины взломанного замка аптечки!");
 				}
 			}
 		}
@@ -282,15 +366,20 @@ class ActionSearchFurniture : ActionContinuousBase
 	}
 };
 
-// ----------------------------------------------------------------------------
-// ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР (СВЕРЕНО С ВАНИЛЬНЫМ API DAYZ 1.29)
-// ----------------------------------------------------------------------------
+
+// ============================================================================
+// ЧАСТЬ 3: АВТОМОБИЛЬНЫЙ СЕКТОР (КАПОТЫ И БАГАЖНИКИ ОСТОВОВ МАШИН — ФИНАЛ)
+// ============================================================================
+
 class ActionSearchEngineWreck : ActionContinuousBase
 {
 	void ActionSearchEngineWreck()
 	{
 		m_CallbackClass = ActionSearchEngineWreckCB;
-		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING; 
+		
+		// ИСПРАВЛЕНО ПО ТЗ: Переключаем на красивую стоячую анимацию рук взаимодействия!
+		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_INTERACT; 
+		
 		m_FullBody = true;
 		m_Text = "Попытаться разобрать"; 
 		m_LockTargetOnUse = false;
@@ -320,6 +409,8 @@ class ActionSearchEngineWreck : ActionContinuousBase
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
+			
+			// НАМЕРТВО ЗАФИКСИРОВАНО В ПАМЯТИ: Строгий продольный индекс оси Z вектора капота!
 			if (modelPos[2] < 0.0) return true; 
 		}
 		return false;
@@ -342,12 +433,20 @@ class ActionSearchEngineWreck : ActionContinuousBase
 			{
 				if (player.GetBleedingManagerServer())
 				{
-					player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftArm");
+					if (Math.RandomIntInclusive(0, 1) == 0)
+					{
+						if (!player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftForeArmRoll"))
+							player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightForeArmRoll");
+					}
+					else if (!player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightForeArmRoll"))
+					{
+						player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftForeArmRoll");
+					}
+					
 					player.MessageAction("[HUSHazard]: Вы сильно распороли ладонь о ржавые детали моторного отсека!");
 				}
 
-				// СВЕРЕНО С ВАШИМ РЕПОЗИТОРИЕМ 1.29: Внедряем строго eAgents.WOUND_AGENT
-				player.InsertAgent(eAgents.WOUND_AGENT, 100); 
+				player.InsertAgent(eAgents.WOUND_AGENT, 20); 
 				if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31))
 				{
 					player.GetModifiersManager().ActivateModifier(31); 
@@ -357,7 +456,7 @@ class ActionSearchEngineWreck : ActionContinuousBase
 		}
 		else
 		{
-			gloves.DecreaseHealth("", "", 6.0);
+			gloves.DecreaseHealth("", "", 2.0);
 		}
 
 		HUSHazardServerManager.ProcessSearch(player, targetObj, "wreck_engine");
@@ -365,19 +464,26 @@ class ActionSearchEngineWreck : ActionContinuousBase
 	}
 };
 
+
 class ActionSearchTrunkWreck : ActionContinuousBase
 {
 	void ActionSearchTrunkWreck()
 	{
 		m_CallbackClass = ActionSearchTrunkWreckCB;
-		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_CRAFTING;
-		m_FullBody = true;
+		m_CommandUID = DayZPlayerConstants.CMD_ACTIONFB_INTERACT; 
+		m_FullBody = true; 
+		m_StanceMask = DayZPlayerConstants.STANCEMASK_ALL;
 		m_Text = "Обыскать багажник";
 		m_LockTargetOnUse = false;
 	}
 
+	override void CreateConditionComponents()  
+	{
+		m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT);
+		m_ConditionItem = new CCINotPresent(); // Доступно строго с пустыми руками!
+	}
+
 	override typename GetInputType() { return ContinuousInteractActionInput; }
-	override void CreateConditionComponents() { m_ConditionTarget = new CCTCursor(UAMaxDistances.DEFAULT); m_ConditionItem = new CCINone(); }
 
 	override bool ActionCondition(PlayerBase player, ActionTarget target, ItemBase item)
 	{
@@ -395,19 +501,25 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 				if (GetGame().GetTime() < ActionSearchFurniture.m_HH_GlobalFurnitureCooldowns.Get(uniqueCooldownKey)) return false;
 			}
 
+			if (!HUSHazardServerManager.PlayerHasValidToolForCategory("wreck_trunk", item)) return false;
+
 			vector modelPos = targetObj.WorldToModel(player.GetPosition());
+			
+			// НАМЕРТВО И СТРОГО ЗАФИКСИРОВАНО: Продольный индекс оси Z вектора багажника!
 			if (modelPos[2] >= 0.0) return true;
 		}
 		return false;
 	}
 
 	override void OnFinishProgressServer(ActionData action_data)
-	{
+	{	
 		if (!action_data || !action_data.m_Target || !action_data.m_Target.GetObject()) return;
 		
 		PlayerBase player = action_data.m_Player;
 		Object targetObj = action_data.m_Target.GetObject();
 		string uniqueCooldownKey = targetObj.GetID().ToString() + "_trunk";
+
+		if (!HUSHazardServerManager.PlayerHasValidToolForCategory("wreck_trunk", action_data.m_MainItem)) return;
 
 		EntityAI gloves = player.GetInventory().FindAttachment(InventorySlots.GLOVES);
 		if (!gloves || gloves.IsRuined())
@@ -416,12 +528,20 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 			{
 				if (player.GetBleedingManagerServer())
 				{
-					player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightArm");
+					if (Math.RandomIntInclusive(0, 1) == 0)
+					{
+						if (!player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftForeArmRoll"))
+							player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightForeArmRoll");
+					}
+					else if (!player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("RightForeArmRoll"))
+					{
+						player.GetBleedingManagerServer().AttemptAddBleedingSourceBySelection("LeftForeArmRoll");
+					}
+					
 					player.MessageAction("[HUSHazard]: Вы глубоко распороли ладонь об острый край ржавого багажника!");
 				}
 
-				// СВЕРЕНО С ВАШИМ РЕПОЗИТОРИЕМ 1.29: Внедряем строго eAgents.WOUND_AGENT
-				player.InsertAgent(eAgents.WOUND_AGENT, 100); 
+				player.InsertAgent(eAgents.WOUND_AGENT, 20); 
 				if (player.GetModifiersManager() && !player.GetModifiersManager().IsModifierActive(31))
 				{
 					player.GetModifiersManager().ActivateModifier(31); 
@@ -431,7 +551,7 @@ class ActionSearchTrunkWreck : ActionContinuousBase
 		}
 		else
 		{
-			gloves.DecreaseHealth("", "", 6.0);
+			gloves.DecreaseHealth("", "", 2.0);
 		}
 
 		HUSHazardServerManager.ProcessSearch(player, targetObj, "wreck_trunk");
@@ -587,10 +707,14 @@ modded class ActionConstructor
 	{
 		super.RegisterActions(actions);
 		actions.Insert(ActionSearchHazard);     
-		actions.Insert(ActionSearchFurniture);  
 		actions.Insert(ActionSearchZombie);    
 		actions.Insert(ActionSearchTrunkWreck);   
 		actions.Insert(ActionSearchEngineWreck);  
+		
+		actions.Insert(ActionSearchFurniture);
+
+		actions.Insert(ActionHH_Scream);
+
 	}
 };
 
@@ -600,9 +724,11 @@ modded class PlayerBase
 	{
 		super.SetActions();
 		AddAction(ActionSearchHazard);
-		AddAction(ActionSearchFurniture);
 		AddAction(ActionSearchZombie);
 		AddAction(ActionSearchTrunkWreck);   
 		AddAction(ActionSearchEngineWreck);  
+		
+		// Добавление экшенов в реестр игрока
+		AddAction(ActionSearchFurniture);
 	}
 }
